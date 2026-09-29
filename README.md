@@ -18,6 +18,6 @@
 ## 新实例恢复
 
 ```bash
-git clone <repo-url> && cd <repo>
+git clone https://github.com/Leroyyyyyyyyy/locnvda.git && cd locnvda
 # 之后：scripts/deploy.sh configs/<方案>.env（待实现）
 ```

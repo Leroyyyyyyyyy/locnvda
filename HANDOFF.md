@@ -117,7 +117,7 @@
 
 - [x] 需求整理、本 handoff 文档
 - [x] 本地 git 仓库（main 分支）+ 目录骨架 + `configs/_template.env`
-- [ ] 建 GitHub 仓库并推送初始结构
+- [x] GitHub 仓库（public）：https://github.com/Leroyyyyyyyyy/locnvda
 - [ ] 阶段 1：部署脚本（先用 0.8B/4B 跑通）
 - [ ] 阶段 2：压测脚本
 - [ ] 阶段 3：量化对比
