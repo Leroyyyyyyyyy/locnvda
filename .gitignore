@@ -1,0 +1,18 @@
+# Secrets (HF_TOKEN, API keys) — never commit
+/.env
+*.secret
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Models / caches (always re-downloaded from Hugging Face)
+models/
+.cache/
+hf_cache/
+
+# Runtime
+*.log
+logs/
+*.pid
