@@ -19,5 +19,26 @@
 
 ```bash
 git clone https://github.com/Leroyyyyyyyyy/locnvda.git && cd locnvda
-# 之后：scripts/deploy.sh configs/<方案>.env（待实现）
+scripts/deploy.sh configs/qwen3.5-0.8b.env    # 装环境 → 下模型 → 启动 → 冒烟测试
+```
+
+| 脚本 | 作用 |
+|---|---|
+| `scripts/deploy.sh <config>` | 一键部署（下面几步串起来，后台运行 vLLM） |
+| `scripts/setup.sh` | 装 uv、Python venv、vLLM（版本固定） |
+| `scripts/download.sh <config>` | 从 HF 下载模型到 `/workspace/models`（没有则 `./models`） |
+| `scripts/serve_vllm.sh <config>` | 前台启动 vLLM；`DRY_RUN=1` 只打印命令 |
+| `scripts/smoke_test.sh <config>` | 调 `/health`、`/v1/models`、`/v1/chat/completions` |
+| `scripts/stop.sh` | 停止后台 vLLM |
+
+临时改参数不用改配置文件，环境变量优先：
+
+```bash
+GPU_MEMORY_UTILIZATION=0.5 MAX_MODEL_LEN=4096 scripts/deploy.sh configs/qwen3.5-0.8b.env
+```
+
+服务默认只监听 `127.0.0.1`，从本地电脑用 SSH 隧道访问（端口和地址用 Vast 控制台给的）：
+
+```bash
+ssh -p <vast-ssh-port> root@<vast-ip> -L 8000:127.0.0.1:8000
 ```
