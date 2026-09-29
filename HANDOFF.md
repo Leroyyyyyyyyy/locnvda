@@ -103,22 +103,62 @@
 
 压测指标：**TTFT**（首 token 延迟）、**TPOT/ITL**（每 token 间隔）、**输出 tokens/s**（单请求 & 总吞吐）、**请求吞吐 req/s**、P50/P90/P99。
 
-> 注意：Qwen3.5 的具体架构（层数、KV head 数、是否含线性注意力层等）会影响 KV cache 估算，部署前从模型 `config.json` 确认后再算显存账。
+> 注意：Qwen3.5 是混合注意力架构，KV cache 估算见 8.2。
 
-## 8. 待确认事项
+## 8. 已确认事项（2026-09-29 查 HF API）
 
-- [ ] HF 仓库名：Qwen3.5-0.8B / 4B / 9B / 27B 的准确 repo id
-- [ ] 是否有官方 AWQ / FP8 版本；没有的话用哪个社区版本或自己量化
-- [ ] vLLM / SGLang 当前版本对 Qwen3.5 的支持情况（最低版本要求）
-- [ ] 模型是否需要 HF token（gated）
+### 8.1 仓库名与权重大小
+
+全部 **非 gated、Apache-2.0**，不需要 HF token（但带 token 下载限速更宽松）。
+
+| 用途 | repo id | 权重 | 备注 |
+|---|---|---|---|
+| 流程跑通 | `Qwen/Qwen3.5-0.8B` | 1.7 GB | 官方 |
+| 流程跑通 | `Qwen/Qwen3.5-4B` | 9.3 GB | 官方 |
+| 9B BF16 | `Qwen/Qwen3.5-9B` | 19.3 GB | 官方；24GB 卡上 KV cache 只剩约 2GB |
+| 9B AWQ | `cyankiwi/Qwen3.5-9B-AWQ-4bit` | 9.1 GB | 社区；备选 `QuantTrio/Qwen3.5-9B-AWQ`（12.4 GB） |
+| 9B FP8 | `RedHatAI/Qwen3.5-9B-FP8-dynamic` | 14.0 GB | 社区；**官方没有 9B FP8/Int4** |
+| 27B BF16（方案 c） | `Qwen/Qwen3.5-27B` | 55.6 GB | 官方 |
+| 27B FP8（方案 b） | `Qwen/Qwen3.5-27B-FP8` | 30.9 GB | 官方 |
+| 27B AWQ（方案 a/b） | `cyankiwi/Qwen3.5-27B-AWQ-4bit` | 20.1 GB | 社区；备选 `QuantTrio/Qwen3.5-27B-AWQ`（21.9 GB） |
+| 27B GPTQ | `Qwen/Qwen3.5-27B-GPTQ-Int4` | 30.2 GB | 官方，但**放不进 24GB**（见下） |
+
+- 官方**没有 AWQ**，只有 FP8 和 GPTQ-Int4（且只有 27B 及以上才有）。
+- 所有 `-Base` 版本是预训练底座，部署服务用不带 `-Base` 的版本。
+
+### 8.2 关键发现：架构与显存
+
+- **是多模态模型**：架构 `Qwen3_5ForConditionalGeneration`（HF 标签 image-text-to-text），带视觉编码器。只做文本服务时 vLLM 可加 `--language-model-only` 省显存（模型卡给出的参数）。
+- **混合注意力**：27B 共 64 层，只有 16 层是标准 full attention，48 层是线性注意力（`full_attention_interval=4`）。9B 为 32 层中 8 层 full attention。
+  - 只有 full attention 层产生随长度增长的 KV cache；线性注意力层每个序列一份**固定大小**的状态。
+  - KV cache 估算（BF16）：每 token = full 层数 × 2(K,V) × 4 KV heads × 256 head_dim × 2 字节
+    - 27B：16 × 2 × 4 × 256 × 2 = **64 KB/token** → 1 GB ≈ 16K tokens
+    - 9B：8 × 2 × 4 × 256 × 2 = **32 KB/token** → 1 GB ≈ 32K tokens
+  - 比同尺寸纯 Transformer 小很多，这是方案 a 仍有可能跑起来的原因。
+- **官方 GPTQ-Int4 为什么 30GB**：它的量化配置排除了所有 `attn`（包括线性注意力）、视觉、MTP 层，只量化 MLP，所以比社区 AWQ 大 10GB。
+- **方案 a 风险**：社区 AWQ 权重 20–22GB，24GB 卡上留给 KV cache 和激活的只有 1–2GB。需要 `--language-model-only`、较高的 `--gpu-memory-utilization`、较小的 `--max-model-len`，可能还要 `--enforce-eager`（不用 CUDA graph，省显存但会变慢）。能否跑通要实测。
+- 模型卡建议上下文 ≥128K 以保留 thinking 能力；24GB 方案做不到，压测时统一用非 thinking 模式或固定输出长度。
+
+### 8.3 服务相关
+
+- **默认 thinking 模式**（输出 `<think>...</think>`）。vLLM 加 `--reasoning-parser qwen3` 把思考内容拆到单独字段；请求里用 `"chat_template_kwargs": {"enable_thinking": false}` 关闭。**压测必须固定这一项**，否则输出长度不可比。
+- 工具调用：`--enable-auto-tool-choice --tool-call-parser qwen3_coder`。
+- 自带 MTP 投机解码：`--speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'`，可作为后续优化对比项。
+- 框架版本：模型卡发布时（2026-02）要求 vLLM / SGLang 的 main 分支；当前 PyPI 最新是 **vLLM 0.30.0、SGLang 0.5.20**，应已支持，在实例上首次部署时验证并把版本号固定到脚本里。
+
+### 8.4 仍待确认
+
 - [ ] Vast 镜像选择（官方 vLLM 镜像 vs CUDA 基础镜像 + 自装）
+- [ ] 社区量化版本的效果（阶段 3 用 eval 集对比官方 BF16）
 
 ## 9. 当前进度
 
 - [x] 需求整理、本 handoff 文档
 - [x] 本地 git 仓库（main 分支）+ 目录骨架 + `configs/_template.env`
 - [x] GitHub 仓库（public）：https://github.com/Leroyyyyyyyyy/locnvda
-- [ ] 阶段 1：部署脚本（先用 0.8B/4B 跑通）
+- [x] 阶段 1a：部署脚本已写好（`scripts/`，配置 `configs/qwen3.5-0.8b.env`、`qwen3.5-4b.env`），本地 dry run 通过
+- [ ] 阶段 1b：在 Vast 实例上真实跑通 0.8B → 4B，记录启动日志里的显存数据
+- [ ] 阶段 1c：参数实验（gpu-memory-utilization、max-model-len、language-model-only、enforce-eager）
 - [ ] 阶段 2：压测脚本
 - [ ] 阶段 3：量化对比
 - [ ] 阶段 4：API 网关
@@ -127,6 +167,6 @@
 
 ## 10. 下一步
 
-1. 在 HF 上确认模型仓库名，填入第 8 节。
-2. 初始化 git 仓库，建第 6 节目录骨架，推到 GitHub。
-3. 写 `configs/qwen3.5-0.8b.env` + `scripts/deploy.sh`，在 Vast 24GB 实例上跑通并用 `curl` 调通 OpenAI 接口。
+1. 租 Vast 3090/4090（CUDA 12.x 基础镜像，50GB 磁盘），`git clone` 后运行 `scripts/deploy.sh configs/qwen3.5-0.8b.env`。
+2. 首次运行要验证：vLLM 0.30.0 能否装上并识别 Qwen3.5；`--language-model-only` 是否被接受。有问题就改 `setup.sh` 里的版本号。
+3. 记录启动日志中的权重显存、KV cache 大小、最大并发数，写进 `results/`。
