@@ -161,7 +161,7 @@
 - [x] 阶段 1b-2：跑通 4B（Max CUDA 13 机器），基线表已补全
 - [x] 阶段 1c：参数实验（gpu-memory-utilization、max-model-len、language-model-only、kv-cache-dtype），结论见 `results/stage1-baseline.md`
 - [x] 阶段 2a：压测脚本（`bench/bench.py`、`report.py`、`run_suite.sh`），本地用模拟服务端测试通过
-- [ ] 阶段 2b：在实例上跑 0.8B / 4B 标准套件，验证真实 vLLM 下的指标
+- [x] 阶段 2b：0.8B / 4B 标准套件跑通，分析见 `results/stage2-analysis.md`
 - [ ] 阶段 3：量化对比
 - [ ] 阶段 4：API 网关
 - [ ] 阶段 5：SGLang 对比

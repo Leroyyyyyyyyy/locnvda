@@ -1,0 +1,167 @@
+{
+  "label": "qwen3.5-4b · vllm",
+  "timestamp": "2026-09-30T15:44:32",
+  "workload": {
+    "workload_name": "long",
+    "api": "completions",
+    "input_len": 7680,
+    "output_len": 256,
+    "shared_prefix_len": 0,
+    "seed": 0
+  },
+  "server": {
+    "base_url": "http://127.0.0.1:8000",
+    "framework": "vllm",
+    "framework_version": "0.30.0",
+    "served_max_model_len": 16384,
+    "served_model": "qwen3.5-4b"
+  },
+  "deployment": {
+    "CONFIG_NAME": "qwen3.5-4b",
+    "MODEL_ID": "Qwen/Qwen3.5-4B",
+    "SERVED_MODEL_NAME": "qwen3.5-4b",
+    "QUANTIZATION": "",
+    "DTYPE": "auto",
+    "TENSOR_PARALLEL_SIZE": "1",
+    "GPU_MEMORY_UTILIZATION": "0.90",
+    "MAX_MODEL_LEN": "16384",
+    "KV_CACHE_DTYPE": "auto",
+    "MAX_NUM_SEQS": "64",
+    "LANGUAGE_MODEL_ONLY": "1",
+    "REASONING_PARSER": "qwen3",
+    "ENFORCE_EAGER": "0",
+    "HOST": "127.0.0.1",
+    "PORT": "8000",
+    "EXTRA_ARGS": "",
+    "CONFIG_OVERRIDES": "",
+    "SERVE_CMD": "vllm serve /workspace/models/Qwen__Qwen3.5-4B --served-model-name qwen3.5-4b --host 127.0.0.1 --port 8000 --dtype auto --tensor-parallel-size 1 --gpu-memory-utilization 0.90 --max-model-len 16384 --max-num-seqs 64 --kv-cache-dtype auto --language-model-only --reasoning-parser qwen3"
+  },
+  "host": {
+    "gpus": [
+      "NVIDIA GeForce RTX 3090, 24576 MiB"
+    ],
+    "git_commit": "c5f1762"
+  },
+  "levels": [
+    {
+      "concurrency": 1,
+      "num_requests": 16,
+      "completed": 16,
+      "failed": 0,
+      "errors": [],
+      "duration_s": 69.0313048758544,
+      "request_throughput": 0.23177890130824458,
+      "input_tok_s": 1780.0619620473183,
+      "output_tok_s": 59.33539873491061,
+      "total_tok_s": 1839.397360782229,
+      "mean_prompt_tokens": 7680.0,
+      "mean_output_tokens": 256.0,
+      "short_outputs": 0,
+      "ttft_ms": {
+        "mean": 1105.3514874365646,
+        "p50": 1105.863994685933,
+        "p90": 1106.7095731850713,
+        "p99": 1106.9047792581841
+      },
+      "tpot_ms": {
+        "mean": 12.5846176679867,
+        "p50": 12.584327868021585,
+        "p90": 12.591051669133936,
+        "p99": 12.591450219316519
+      },
+      "itl_ms": {
+        "mean": 12.584489866789868,
+        "p50": 12.60266499593854,
+        "p90": 12.69891057163477,
+        "p99": 12.943740375339985
+      },
+      "e2e_s": {
+        "mean": 4.314428992773173,
+        "p50": 4.31427238881588,
+        "p90": 4.3167992532253265,
+        "p99": 4.3173177559161555
+      },
+      "per_request_tok_s": 79.46208827176717
+    },
+    {
+      "concurrency": 4,
+      "num_requests": 16,
+      "completed": 16,
+      "failed": 0,
+      "errors": [],
+      "duration_s": 31.203917324077338,
+      "request_throughput": 0.5127561335914128,
+      "input_tok_s": 3937.9671059820503,
+      "output_tok_s": 131.26557019940168,
+      "total_tok_s": 4069.232676181452,
+      "mean_prompt_tokens": 7680.0,
+      "mean_output_tokens": 256.0,
+      "short_outputs": 0,
+      "ttft_ms": {
+        "mean": 1959.5726591651328,
+        "p50": 1740.300336619839,
+        "p90": 2926.389579195529,
+        "p99": 4162.528608809225
+      },
+      "tpot_ms": {
+        "mean": 22.81118764076382,
+        "p50": 23.55223229867132,
+        "p90": 25.194660198016493,
+        "p99": 25.33210897124281
+      },
+      "itl_ms": {
+        "mean": 22.811068480665448,
+        "p50": 14.06414550729096,
+        "p90": 14.226777013391256,
+        "p99": 228.2881475938484
+      },
+      "e2e_s": {
+        "mean": 7.776425507559907,
+        "p50": 7.775376043980941,
+        "p90": 8.804435390047729,
+        "p99": 10.205266466178
+      },
+      "per_request_tok_s": 43.83813836211623
+    },
+    {
+      "concurrency": 16,
+      "num_requests": 64,
+      "completed": 64,
+      "failed": 0,
+      "errors": [],
+      "duration_s": 88.37913499306887,
+      "request_throughput": 0.7241528218738416,
+      "input_tok_s": 5561.493671991103,
+      "output_tok_s": 185.38312239970344,
+      "total_tok_s": 5746.876794390806,
+      "mean_prompt_tokens": 7680.0,
+      "mean_output_tokens": 256.0,
+      "short_outputs": 0,
+      "ttft_ms": {
+        "mean": 3855.241817291244,
+        "p50": 1973.7734899390489,
+        "p90": 10724.20811611228,
+        "p99": 17000.74414045084
+      },
+      "tpot_ms": {
+        "mean": 71.00294898218458,
+        "p50": 78.23358284327767,
+        "p90": 78.88372429135238,
+        "p99": 80.69371734263704
+      },
+      "itl_ms": {
+        "mean": 71.00284381566442,
+        "p50": 19.444659119471908,
+        "p90": 242.21085999161005,
+        "p99": 265.04138324875385
+      },
+      "e2e_s": {
+        "mean": 21.96099380774831,
+        "p50": 21.958617189200595,
+        "p90": 30.581706376932566,
+        "p99": 37.028711070283315
+      },
+      "per_request_tok_s": 14.083922067108945
+    }
+  ]
+}
