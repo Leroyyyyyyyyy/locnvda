@@ -168,6 +168,6 @@
 
 ## 10. 下一步
 
-1. 租 Vast 3090/4090（CUDA 12.x 基础镜像，50GB 磁盘），`git clone` 后运行 `scripts/deploy.sh configs/qwen3.5-0.8b.env`。
+1. 租 Vast 3090/4090，**筛选 Max CUDA ≥ 13.0**（PyPI 版 vLLM 0.30.0 按 CUDA 13 编译；12.x 驱动走 `+cu129` 版本，能装但可能遇到 JIT 编译兼容问题），镜像 `vastai/base-image` CUDA 12.8，磁盘 60GB，`git clone` 后运行 `scripts/deploy.sh configs/qwen3.5-0.8b.env`。
 2. 首次运行要验证：vLLM 0.30.0 能否装上并识别 Qwen3.5；`--language-model-only` 是否被接受。有问题就改 `setup.sh` 里的版本号。
 3. 记录启动日志中的权重显存、KV cache 大小、最大并发数，写进 `results/`。
