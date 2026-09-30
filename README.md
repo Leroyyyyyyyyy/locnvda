@@ -48,7 +48,11 @@ python bench/report.py results/raw/qwen3.5-9b*.json results/raw/qwen3.5-27b*.jso
 ```
 
 - 部署时的生效配置（含环境变量覆盖）自动记录在 `logs/deployed.env`，压测结果据此标注模型、量化、TP 等元数据。
-- 原始结果在 `results/raw/*.json`，**destroy 实例前要 `git add results && git commit && git push`**。
+- 原始结果在 `results/raw/*.json`，报告在 `results/report-*.md`。实例上没有 GitHub 凭证，**destroy 前在本地电脑把结果拉回来再提交**：
+
+```bash
+scp -i ~/.ssh/vast_ed25519 -P <vast-ssh-port> -r "root@<vast-ip>:/workspace/locnvda/results/*" results/
+```
 
 服务默认只监听 `127.0.0.1`，从本地电脑用 SSH 隧道访问（端口和地址用 Vast 控制台给的）：
 
