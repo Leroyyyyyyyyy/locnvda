@@ -159,7 +159,7 @@
 - [x] 阶段 1a：部署脚本已写好（`scripts/`，配置 `configs/qwen3.5-0.8b.env`、`qwen3.5-4b.env`），本地 dry run 通过
 - [x] 阶段 1b-1：Vast 3090 上跑通 0.8B（vLLM 0.30.0 + `--language-model-only` 均可用），数据见 `results/stage1-baseline.md`
 - [x] 阶段 1b-2：跑通 4B（Max CUDA 13 机器），基线表已补全
-- [ ] 阶段 1c：参数实验（gpu-memory-utilization、max-model-len、language-model-only、enforce-eager）
+- [x] 阶段 1c：参数实验（gpu-memory-utilization、max-model-len、language-model-only、kv-cache-dtype），结论见 `results/stage1-baseline.md`
 - [ ] 阶段 2：压测脚本
 - [ ] 阶段 3：量化对比
 - [ ] 阶段 4：API 网关
