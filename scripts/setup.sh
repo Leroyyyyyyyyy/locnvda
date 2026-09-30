@@ -26,9 +26,28 @@ if [[ ! -d "$VENV_DIR" ]]; then
 fi
 source "$VENV_DIR/bin/activate"
 
-# --torch-backend=auto：uv 根据本机 CUDA 驱动自动选择匹配的 PyTorch 版本
-log "安装 vllm==$VLLM_VERSION"
-uv pip install "vllm==$VLLM_VERSION" --torch-backend=auto
+# 按驱动支持的最高 CUDA 版本选 vLLM 构建：
+#   - PyPI 上的默认 wheel 按 CUDA 13 编译，驱动必须 >= 13.0
+#   - 驱动是 12.x 时用 GitHub Release 上的 +cu129 wheel，配 cu129 的 PyTorch
+#     （CUDA 同一大版本内“小版本兼容”，12.9 编译的程序可以跑在 12.8 驱动上）
+driver_cuda="$(nvidia-smi | grep -oE 'CUDA Version: [0-9]+\.[0-9]+' | awk '{print $3}')"
+[[ -n "$driver_cuda" ]] || die "读不到驱动的 CUDA 版本"
+driver_major="${driver_cuda%%.*}"
+log "驱动最高支持 CUDA $driver_cuda"
+
+if (( driver_major >= 13 )); then
+  vllm_spec="vllm==$VLLM_VERSION"
+  torch_backend="cu130"
+elif (( driver_major == 12 )); then
+  vllm_spec="vllm @ https://github.com/vllm-project/vllm/releases/download/v$VLLM_VERSION/vllm-$VLLM_VERSION+cu129-cp38-abi3-manylinux_2_28_$(uname -m).whl"
+  torch_backend="cu129"
+else
+  die "驱动 CUDA $driver_cuda 太旧，租 Max CUDA >= 12.8 的机器"
+fi
+
+# --torch-backend：让 uv 从对应 CUDA 版本的 PyTorch 源安装 torch
+log "安装 vLLM $VLLM_VERSION (torch backend: $torch_backend)"
+uv pip install "$vllm_spec" --torch-backend="$torch_backend"
 uv pip install "huggingface_hub[cli]"
 
 log "版本信息"

@@ -17,7 +17,10 @@ if [[ -f "$pidfile" ]] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
   die "已有 vLLM 在运行 (pid $(cat "$pidfile"))，先运行 scripts/stop.sh"
 fi
 
-[[ -d "$VENV_DIR" ]] || scripts/setup.sh
+# 环境能正常 import vllm 才跳过安装；装坏的环境会重新装
+if ! "$VENV_DIR/bin/python" -c "import vllm" >/dev/null 2>&1; then
+  scripts/setup.sh
+fi
 scripts/download.sh "$CONFIG"
 
 log "后台启动 vLLM，日志: $logfile"
