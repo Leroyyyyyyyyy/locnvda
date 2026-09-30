@@ -39,7 +39,7 @@ done
 log "服务就绪，用时 $((SECONDS - start))s"
 
 # 启动日志里最值得看的几行：权重占用、KV cache 大小、最大并发
-grep -iE "model weights took|kv cache|maximum concurrency|cuda graph" "$logfile" | tail -10 >&2 || true
+grep -iE "KV cache size|maximum concurrency|model weights took|memory utilization is" "$logfile" | tail -10 >&2 || true
 nvidia-smi --query-gpu=index,memory.used,memory.total --format=csv >&2
 
 scripts/smoke_test.sh "$CONFIG"

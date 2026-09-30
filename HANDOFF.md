@@ -148,7 +148,7 @@
 
 ### 8.4 仍待确认
 
-- [ ] Vast 镜像选择（官方 vLLM 镜像 vs CUDA 基础镜像 + 自装）
+- [x] Vast 镜像：用 Vast 官方 CUDA 基础模板（SSH 启动），不用 vLLM / PyTorch 模板。vLLM 0.30.0 依赖 torch 2.13.0（有 cu126/cu129/cu130/cu132 版本），CUDA 运行时由 pip 包自带，关键看宿主机驱动：筛选 Max CUDA ≥ 13.0（最低 12.9）的机器。
 - [ ] 社区量化版本的效果（阶段 3 用 eval 集对比官方 BF16）
 
 ## 9. 当前进度
@@ -157,7 +157,8 @@
 - [x] 本地 git 仓库（main 分支）+ 目录骨架 + `configs/_template.env`
 - [x] GitHub 仓库（public）：https://github.com/Leroyyyyyyyyy/locnvda
 - [x] 阶段 1a：部署脚本已写好（`scripts/`，配置 `configs/qwen3.5-0.8b.env`、`qwen3.5-4b.env`），本地 dry run 通过
-- [ ] 阶段 1b：在 Vast 实例上真实跑通 0.8B → 4B，记录启动日志里的显存数据
+- [x] 阶段 1b-1：Vast 3090 上跑通 0.8B（vLLM 0.30.0 + `--language-model-only` 均可用），数据见 `results/stage1-baseline.md`
+- [ ] 阶段 1b-2：跑通 4B，补全基线表
 - [ ] 阶段 1c：参数实验（gpu-memory-utilization、max-model-len、language-model-only、enforce-eager）
 - [ ] 阶段 2：压测脚本
 - [ ] 阶段 3：量化对比
