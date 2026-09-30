@@ -37,6 +37,19 @@ scripts/deploy.sh configs/qwen3.5-0.8b.env    # 装环境 → 下模型 → 启�
 GPU_MEMORY_UTILIZATION=0.5 MAX_MODEL_LEN=4096 scripts/deploy.sh configs/qwen3.5-0.8b.env
 ```
 
+## 压测
+
+服务用 `deploy.sh` 启动后，在实例上运行（压测客户端和服务在同一台机器，避免网络延迟混进 TTFT）：
+
+```bash
+bench/run_suite.sh                          # 标准套件：chat(1K/256) + long(7.5K/256)，自动生成对比报告
+python bench/bench.py --input-len 2048 --output-len 128 --concurrency 1,8,32   # 单次自定义
+python bench/report.py results/raw/qwen3.5-9b*.json results/raw/qwen3.5-27b*.json --out results/9b-vs-27b.md
+```
+
+- 部署时的生效配置（含环境变量覆盖）自动记录在 `logs/deployed.env`，压测结果据此标注模型、量化、TP 等元数据。
+- 原始结果在 `results/raw/*.json`，**destroy 实例前要 `git add results && git commit && git push`**。
+
 服务默认只监听 `127.0.0.1`，从本地电脑用 SSH 隧道访问（端口和地址用 Vast 控制台给的）：
 
 ```bash

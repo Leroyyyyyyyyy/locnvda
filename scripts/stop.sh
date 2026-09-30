@@ -13,4 +13,4 @@ if kill -0 "$pid" 2>/dev/null; then
   for _ in $(seq 30); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
   kill -0 "$pid" 2>/dev/null && { log "30s 未退出，强制结束"; kill -9 "$pid"; }
 fi
-rm -f "$pidfile"
+rm -f "$pidfile" "$LOG_DIR/deployed.env"

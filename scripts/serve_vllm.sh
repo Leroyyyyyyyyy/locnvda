@@ -37,4 +37,5 @@ fi
 activate_venv
 [[ -f "$MODEL_PATH/config.json" ]] || die "模型不在 $MODEL_PATH，先运行 scripts/download.sh $1"
 log "启动: vllm ${args[*]}"
+save_deployed_config "vllm ${args[*]}"
 exec vllm "${args[@]}"
