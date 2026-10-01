@@ -125,6 +125,9 @@
 
 - 官方**没有 AWQ**，只有 FP8 和 GPTQ-Int4（且只有 27B 及以上才有）。
 - 所有 `-Base` 版本是预训练底座，部署服务用不带 `-Base` 的版本。
+- 9B 社区量化的格式（2026-10-01 查 config.json）：两个都是 **compressed-tensors**，配置里 `QUANTIZATION` 必须留空让 vLLM 自动识别。
+  - `cyankiwi/Qwen3.5-9B-AWQ-4bit`：名字叫 AWQ，实际是 W4A16 int4、group_size=32；除 lm_head 和线性注意力 `in_proj_a/b` 外全部 Linear 都量化。
+  - `RedHatAI/Qwen3.5-9B-FP8-dynamic`：W8A8（权重按通道静态、激活按 token 动态）；**线性注意力层的投影全部保留 BF16**，只量化 full attention 和 MLP，所以 14GB。3090 上没有 FP8 单元，会退化为 W8A16。
 
 ### 8.2 关键发现：架构与显存
 
@@ -163,6 +166,9 @@
 - [x] 阶段 2a：压测脚本（`bench/bench.py`、`report.py`、`run_suite.sh`），本地用模拟服务端测试通过
 - [x] 阶段 2b：0.8B / 4B 标准套件跑通，分析见 `results/stage2-analysis.md`
 - [ ] 阶段 3：量化对比
+  - [x] 3a：9B 三份配置 `configs/qwen3.5-9b-{bf16,awq,fp8}.env`，除模型外参数完全相同，本地 dry run 通过
+  - [ ] 3b：同一台实例依次部署三份配置，记录显存、跑标准压测套件
+  - [ ] 3c：效果对比（`eval/` 评测集，含 FP8 KV cache 的精度影响）
 - [ ] 阶段 4：API 网关
 - [ ] 阶段 5：SGLang 对比
 - [ ] 阶段 6：27B 方案 a / b / c
