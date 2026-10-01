@@ -70,7 +70,8 @@
 │   ├── qwen3.5-9b-awq.env
 │   ├── qwen3.5-9b-fp8.env
 │   ├── qwen3.5-27b-a-awq-1x24g.env
-│   ├── qwen3.5-27b-b-tp2-2x24g.env
+│   ├── qwen3.5-27b-b-fp8-tp2-2x24g.env
+│   ├── qwen3.5-27b-b-awq-tp2-2x24g.env
 │   └── qwen3.5-27b-c-bf16.env
 ├── scripts/
 │   ├── setup.sh              # 装环境（python/venv、vllm、sglang）
@@ -172,9 +173,13 @@
 - [ ] 阶段 4：API 网关
 - [ ] 阶段 5：SGLang 对比
 - [ ] 阶段 6：27B 方案 a / b / c
+  - 当前执行顺序调整：用户选择先做 27B 方案 b（同机 2×4090，TP=2），先 FP8 后 AWQ；9B 配置保留，BF16 基准需另租大显存卡。
+  - [x] 方案 b 两份配置已写好，本地 dry run 通过；HF config.json 确认官方 FP8 为 `fp8` / 128×128 block，社区 AWQ 为 `compressed-tensors` / int4 / group_size=32，两者都自动识别。
+  - 实例验机确认：2×RTX 4090，各 24564MiB，驱动 615.71.09；GPU0/GPU1 拓扑为 NODE，同一 NUMA 节点。系统可见内存 503GiB（可能为宿主机总量），磁盘可用约 150G；通信性能、量化 kernel 及显存余量待实测。
+  - 首次 setup 在 CUDA 版本解析处提前退出：旧正则要求冒号后恰好一个空格，grep 无匹配触发 `set -e`。改用 awk 容忍任意空白，无法解析时明确报错；模拟单/多空格、tab、CUDA 12/13、N/A 和字段缺失共 7 项通过，实例上待重试。
 
 ## 10. 下一步
 
-1. 租 Vast 3090/4090，**筛选 Max CUDA ≥ 13.0**（PyPI 版 vLLM 0.30.0 按 CUDA 13 编译；12.x 驱动走 `+cu129` 版本，能装但可能遇到 JIT 编译兼容问题），镜像 `vastai/base-image` CUDA 12.8，磁盘 60GB，`git clone` 后运行 `scripts/deploy.sh configs/qwen3.5-0.8b.env`。
-2. 首次运行要验证：vLLM 0.30.0 能否装上并识别 Qwen3.5；`--language-model-only` 是否被接受。有问题就改 `setup.sh` 里的版本号。
-3. 记录启动日志中的权重显存、KV cache 大小、最大并发数，写进 `results/`。
+1. 在已租实例 `git pull --ff-only` 后重试 `scripts/setup.sh`（已修复 CUDA 版本解析）；确认驱动最高支持 CUDA ≥13.0、安装后 PyTorch 识别两张 GPU。
+2. 同步本地新增配置到实例，部署 `configs/qwen3.5-27b-b-fp8-tp2-2x24g.env`；确认双卡通信、实际量化 kernel、冒烟测试，记录启动显存数据，跑标准压测套件。
+3. 停止 FP8 服务，用 `configs/qwen3.5-27b-b-awq-tp2-2x24g.env` 部署并跑相同套件；不要同时启动两个服务。destroy 前拉回结果和启动日志。
