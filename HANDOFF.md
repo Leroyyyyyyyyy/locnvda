@@ -177,10 +177,19 @@
   - [x] 方案 b 两份配置已写好，本地 dry run 通过；HF config.json 确认官方 FP8 为 `fp8` / 128×128 block，社区 AWQ 为 `compressed-tensors` / int4 / group_size=32，两者都自动识别。
   - 实例验机确认：2×RTX 4090，各 24564MiB，驱动 615.71.09；GPU0/GPU1 拓扑为 NODE，同一 NUMA 节点。系统可见内存 503GiB（可能为宿主机总量），磁盘可用约 150G；通信性能、量化 kernel 及显存余量待实测。
   - setup 退出的实际原因已确认：驱动 615.71.09 的表头改为 `CUDA UMD Version: 13.4`，不是原来的 `CUDA Version`（最初误判为空白格式问题）。解析已兼容新旧字段和空白，无效值与命令失败都会明确报错；13.4 驱动选择 cu130 构建。
-  - 回归测试 `tests/test_setup.py`：用模拟命令运行 setup，不联网、不安装包，覆盖实例原始表头、新旧字段、空白、CUDA 12/13、N/A、字段缺失及 nvidia-smi 失败。运行 `python3 -m unittest discover -s tests -v`；实例安装仍待重试。
+  - 回归测试 `tests/test_setup.py`：用模拟命令运行 setup，不联网、不安装包，覆盖实例原始表头、新旧字段、空白、CUDA 12/13、N/A、字段缺失及 nvidia-smi 失败。运行 `python3 -m unittest discover -s tests -v`；实例已安装成功：vLLM 0.30.0、torch 2.13.0+cu130、CUDA 13.0、gpus=2。
+  - [x] 27B 官方 FP8 / TP=2 部署和冒烟测试成功，启动基线见 `results/stage3-27b-baseline.md`；每卡 nvidia-smi 占用 22072MiB。TP1 报告 weights+non-torch=14.39GiB、激活=0.75GiB、CUDA graph=0.12GiB、KV cache=6.1GiB；EngineCore 报告容量 122398 token，满 8192 上下文最大并发 14.94x（整个 TP=2 服务，不能再乘 2）；实际 kernel 已确认是 Marlin FP8 weight-only（非原生 W8A8）。
+  - [x] 27B FP8 标准压测：chat 528/528、long 96/96 成功，终端摘要分析见 `results/stage3-27b-fp8-analysis.md`；chat 吞吐 48.5→319.0 tok/s（并发 1→64），32→64 仅 +1.6%。报告 `results/report-20261001-151122.md` 和两份原始 JSON 已拉回并核查，尾延迟与日志证据见运行核查文档。
+  - [x] AWQ / TP=2 相同参数部署和冒烟测试成功，15:23:22 完成；TP0 报告 weights+non-torch=9.24GiB、激活=0.75GiB、CUDA graph=0.12GiB、KV cache=11.25GiB，每卡 nvidia-smi 占用 22086MiB。对比记录见启动基线。
+  - [x] AWQ 缓存容量补录：226484 token，满 8192 上下文最大并发 27.65x，比 FP8 token 容量增加约 85%。
+  - [x] AWQ 标准压测：chat 528/528、long 96/96 成功；与 FP8 的终端摘要对比见 `results/stage3-27b-quant-analysis.md`。AWQ chat 并发 1 吞吐 +39.6%、并发 64 +10.2%；long 并发 16 +6.8%。并发 64 的 TTFT 更低但 TPOT 更高，不能宣称所有延迟指标更好。
+  - [x] 四份 JSON、两轮报告、合并报告和两份服务日志已拉回本地。1248/1248 成功，所有档位输入输出长度精确、无短输出，参数一致，合并报告重生成逐字节相同。
+  - [x] 运行核查见 `results/stage3-27b-runtime-findings.md`：FP8=`MarlinFP8ScaledMMLinearKernel` weight-only，AWQ=`MarlinLinearKernel`；P2P 不可用或测试失败禁用自定义 all-reduce，实际 PYNCCL/NCCL 2.29.7。chat 并发 64 的采样最大 Running 为 FP8 50 / AWQ 64，缓存最高 99.2% / 68.7%；未发现抢占日志，不能证明无抢占。
+  - [x] 尾延迟补录：chat 并发 16 TTFT p99 约 7.8～8s，64 为 FP8 45.50s / AWQ 33.19s；long 并发 16 为 60.88s / 55.81s。不能按 p50 单独推荐生产并发。
+  - [ ] 量化质量评测，及可选的通信 / kernel 支持专项实验。
 
 ## 10. 下一步
 
-1. 在已租实例 `git pull --ff-only` 后重试 `scripts/setup.sh`（已修复 CUDA 版本解析）；确认驱动最高支持 CUDA ≥13.0、安装后 PyTorch 识别两张 GPU。
-2. 同步本地新增配置到实例，部署 `configs/qwen3.5-27b-b-fp8-tp2-2x24g.env`；确认双卡通信、实际量化 kernel、冒烟测试，记录启动显存数据，跑标准压测套件。
-3. 停止 FP8 服务，用 `configs/qwen3.5-27b-b-awq-tp2-2x24g.env` 部署并跑相同套件；不要同时启动两个服务。destroy 前拉回结果和启动日志。
+1. 两轮结果、报告和日志已经安全保存到本地；如不继续使用 GPU，可 destroy 停止计费。原始日志在忽略的 `logs/`，关键证据摘录已写入 `results/stage3-27b-runtime-findings.md`。
+2. 准备独立效果评测；当前只完成显存、速度与运行路径核查，不能仅凭性能决定量化选型。
+3. 后续若研究多卡效率，检查实际 P2P 支持和 NCCL 性能；若研究原生 FP8，先确认量化格式与 kernel 支持，不要只按 GPU 型号推断。
