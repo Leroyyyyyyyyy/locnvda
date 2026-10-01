@@ -30,14 +30,15 @@ source "$VENV_DIR/bin/activate"
 #   - PyPI 上的默认 wheel 按 CUDA 13 编译，驱动必须 >= 13.0
 #   - 驱动是 12.x 时用 GitHub Release 上的 +cu129 wheel，配 cu129 的 PyTorch
 #     （CUDA 同一大版本内“小版本兼容”，12.9 编译的程序可以跑在 12.8 驱动上）
-# nvidia-smi 的字段间可能有多个空格；不要让 grep 无匹配触发 set -e 静默退出。
+# 兼容旧字段 CUDA Version 和新驱动的 CUDA UMD Version，容忍字段间的空白。
+# 不用 grep，避免无匹配触发 set -e 静默退出。
 driver_info="$(nvidia-smi)" || die "nvidia-smi 执行失败，无法检测驱动 CUDA 版本"
-driver_cuda="$(awk '/CUDA Version:/ {
-  sub(/.*CUDA Version:[[:space:]]*/, "")
+driver_cuda="$(awk '/CUDA([[:space:]]+UMD)?[[:space:]]+Version[[:space:]]*:/ {
+  sub(/.*CUDA([[:space:]]+UMD)?[[:space:]]+Version[[:space:]]*:[[:space:]]*/, "")
   if (match($0, /^[0-9]+[.][0-9]+/)) print substr($0, RSTART, RLENGTH)
   exit
 }' <<< "$driver_info")"
-[[ -n "$driver_cuda" ]] || die "读不到有效的驱动 CUDA 版本，请检查 nvidia-smi 输出（CUDA Version 可能为 N/A）"
+[[ -n "$driver_cuda" ]] || die "读不到有效的驱动 CUDA 版本，请检查 nvidia-smi 输出（CUDA [UMD] Version 可能为 N/A）"
 driver_major="${driver_cuda%%.*}"
 log "驱动最高支持 CUDA $driver_cuda"
 

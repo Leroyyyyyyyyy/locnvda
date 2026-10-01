@@ -176,7 +176,8 @@
   - 当前执行顺序调整：用户选择先做 27B 方案 b（同机 2×4090，TP=2），先 FP8 后 AWQ；9B 配置保留，BF16 基准需另租大显存卡。
   - [x] 方案 b 两份配置已写好，本地 dry run 通过；HF config.json 确认官方 FP8 为 `fp8` / 128×128 block，社区 AWQ 为 `compressed-tensors` / int4 / group_size=32，两者都自动识别。
   - 实例验机确认：2×RTX 4090，各 24564MiB，驱动 615.71.09；GPU0/GPU1 拓扑为 NODE，同一 NUMA 节点。系统可见内存 503GiB（可能为宿主机总量），磁盘可用约 150G；通信性能、量化 kernel 及显存余量待实测。
-  - 首次 setup 在 CUDA 版本解析处提前退出：旧正则要求冒号后恰好一个空格，grep 无匹配触发 `set -e`。改用 awk 容忍任意空白，无法解析时明确报错；模拟单/多空格、tab、CUDA 12/13、N/A 和字段缺失共 7 项通过，实例上待重试。
+  - setup 退出的实际原因已确认：驱动 615.71.09 的表头改为 `CUDA UMD Version: 13.4`，不是原来的 `CUDA Version`（最初误判为空白格式问题）。解析已兼容新旧字段和空白，无效值与命令失败都会明确报错；13.4 驱动选择 cu130 构建。
+  - 回归测试 `tests/test_setup.py`：用模拟命令运行 setup，不联网、不安装包，覆盖实例原始表头、新旧字段、空白、CUDA 12/13、N/A、字段缺失及 nvidia-smi 失败。运行 `python3 -m unittest discover -s tests -v`；实例安装仍待重试。
 
 ## 10. 下一步
 
