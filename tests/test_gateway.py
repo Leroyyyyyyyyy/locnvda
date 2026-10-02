@@ -26,7 +26,10 @@ AUTH_HEADERS = {"Authorization": "Bearer test-key"}
 
 
 def gateway_settings(**overrides):
-    return Settings(**{"api_keys": TEST_KEYS, "upstream_api_key": UPSTREAM_KEY, **overrides})
+    # Regression tests exercise proxy/auth, not production quota defaults.
+    return Settings(**{"api_keys": TEST_KEYS, "upstream_api_key": UPSTREAM_KEY,
+                       "rate_limit_rps": 1000, "rate_limit_burst": 1000,
+                       "max_in_flight": 1, **overrides})
 
 
 @asynccontextmanager
@@ -64,6 +67,9 @@ class ConfigTests(unittest.TestCase):
             "GATEWAY_MAX_CONNECTIONS": "30",
             "GATEWAY_API_KEYS": '{"alice":"test-key","bob":"second-test-key"}',
             "GATEWAY_UPSTREAM_API_KEY": UPSTREAM_KEY,
+            "GATEWAY_RATE_LIMIT_RPS": "2.5",
+            "GATEWAY_RATE_LIMIT_BURST": "6",
+            "GATEWAY_MAX_IN_FLIGHT": "3",
         }, clear=True):
             settings = Settings.from_env()
         self.assertEqual(settings.upstream_url, "http://localhost:9000/prefix/")
@@ -71,6 +77,9 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(settings.max_connections, 30)
         self.assertEqual(dict(settings.api_keys), TEST_KEYS)
         self.assertEqual(settings.upstream_api_key, UPSTREAM_KEY)
+        self.assertEqual(settings.rate_limit_rps, 2.5)
+        self.assertEqual(settings.rate_limit_burst, 6)
+        self.assertEqual(settings.max_in_flight, 3)
 
     def test_invalid_settings(self):
         cases = [
@@ -192,6 +201,143 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         await self.gateway_context.__aexit__(None, None, None)
         await self.upstream_context.__aexit__(None, None, None)
         self.assertTrue(self.gateway_app.state.upstream_client.is_closed)
+        self.assertEqual(self.gateway_app.state.admission.in_flight, 0)
+
+    async def wait_for_in_flight(self, app, count):
+        async with asyncio.timeout(2):
+            while app.state.admission.in_flight != count:
+                await asyncio.sleep(0.01)
+
+    @asynccontextmanager
+    async def limited_gateway(self, **overrides):
+        app = create_app(gateway_settings(upstream_url=self.upstream_url, **overrides))
+        async with running_server(app) as url:
+            async with httpx.AsyncClient(base_url=url, trust_env=False, timeout=3, headers=AUTH_HEADERS) as client:
+                yield app, client
+        self.assertEqual(app.state.admission.in_flight, 0)
+
+    async def test_rate_quota_shared_across_routes_but_independent_per_caller(self):
+        async with self.limited_gateway(rate_limit_rps=0.5, rate_limit_burst=2) as (app, client):
+            clock = [app.state.admission._clock()]
+            app.state.admission._clock = lambda: clock[0]
+            self.assertEqual((await client.get("/v1/models")).status_code, 200)
+            self.assertEqual((await client.post("/v1/completions", content=b"{}")).status_code, 200)
+            rejected = await client.post("/v1/chat/completions", content=b"{}")
+            self.assertEqual(rejected.status_code, 429)
+            self.assertEqual(rejected.json()["error"]["code"], "rate_limit_exceeded")
+            self.assertEqual(rejected.headers["retry-after"], "2")
+            self.assertEqual(len(self.records), 2)  # Rejection never reached upstream.
+            self.assertEqual((await client.get("/v1/models", headers={
+                "Authorization": "Bearer second-test-key",
+            })).status_code, 200)
+            clock[0] += 2
+            self.assertEqual((await client.get("/v1/models")).status_code, 200)
+
+    async def test_invalid_auth_and_health_do_not_spend_frequency_quota(self):
+        async with self.limited_gateway(rate_limit_rps=0.001, rate_limit_burst=1) as (_, client):
+            self.assertEqual((await client.get("/v1/models", headers={
+                "Authorization": "Bearer wrong-key",
+            })).status_code, 401)
+            self.assertEqual((await client.get("/health")).status_code, 200)
+            self.assertEqual(self.records, [])
+            self.assertEqual((await client.get("/v1/models")).status_code, 200)
+            self.assertEqual((await client.get("/v1/models")).status_code, 429)
+            self.assertEqual((await client.get("/health")).status_code, 200)
+            self.assertEqual(len(self.records), 1)
+
+    async def test_rate_rejection_happens_before_reading_body(self):
+        async with self.limited_gateway(rate_limit_rps=0.001, rate_limit_burst=1) as (_, client):
+            self.assertEqual((await client.get("/v1/models")).status_code, 200)
+            reader, writer = await asyncio.open_connection(client.base_url.host, client.base_url.port)
+            try:
+                writer.write(b"POST /v1/completions HTTP/1.1\r\nHost: localhost\r\n"
+                             b"Authorization: Bearer test-key\r\nContent-Length: 1000\r\n\r\n")
+                await writer.drain()  # No body: reject rather than waiting for it.
+                headers = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 1)
+                self.assertIn(b"429 Too Many Requests", headers)
+            finally:
+                writer.close()
+                await writer.wait_closed()
+            self.assertEqual(len(self.records), 1)
+
+    async def test_sse_holds_global_slot_until_complete_but_models_and_health_still_work(self):
+        async with self.limited_gateway(max_in_flight=1, max_connections=2,
+                                        max_keepalive_connections=2) as (app, client):
+            async with client.stream("POST", "/v1/chat/completions", content=b"{}",
+                                     headers={"x-test-mode": "sse"}) as stream:
+                chunks = stream.aiter_bytes()
+                await asyncio.wait_for(anext(chunks), 1)
+                self.assertEqual(app.state.admission.in_flight, 1)
+                busy = await client.post("/v1/completions", content=b"{}", headers={
+                    "Authorization": "Bearer second-test-key",
+                })
+                self.assertEqual(busy.status_code, 503)
+                self.assertEqual(busy.json()["error"]["code"], "gateway_busy")
+                self.assertEqual(busy.headers["retry-after"], "1")
+                self.assertEqual(len(self.records), 1)
+                self.assertEqual((await client.get("/v1/models")).status_code, 200)
+                self.assertEqual((await client.get("/health")).status_code, 200)
+                self.assertEqual(app.state.admission.in_flight, 1)
+                self.stream_release.set()
+                rest = b"".join([chunk async for chunk in chunks])
+                self.assertTrue(rest.endswith(b"data: [DONE]\n\n"))
+            await self.wait_for_in_flight(app, 0)
+            self.assertEqual((await client.post("/v1/completions", content=b"{}")).status_code, 200)
+
+    async def test_stream_disconnect_releases_slot_for_next_inference(self):
+        async with self.limited_gateway(max_in_flight=1) as (app, client):
+            async with client.stream("POST", "/v1/completions", content=b"{}",
+                                     headers={"x-test-mode": "sse"}) as stream:
+                await asyncio.wait_for(anext(stream.aiter_bytes()), 1)
+                self.assertEqual(app.state.admission.in_flight, 1)
+            await asyncio.wait_for(self.stream_closed.wait(), 2)
+            await self.wait_for_in_flight(app, 0)
+            self.assertFalse(self.stream_release.is_set())
+            self.assertEqual((await client.post("/v1/completions", content=b"{}")).status_code, 200)
+
+    async def test_simultaneous_requests_cannot_exceed_global_cap(self):
+        async with self.limited_gateway(max_in_flight=2) as (app, client):
+            responses = await asyncio.gather(*(
+                client.send(client.build_request("POST", "/v1/completions", content=b"{}",
+                                                 headers={"x-test-mode": "sse"}), stream=True)
+                for _ in range(6)
+            ))
+            try:
+                statuses = [response.status_code for response in responses]
+                self.assertEqual(statuses.count(200), 2)
+                self.assertEqual(statuses.count(503), 4)
+                self.assertEqual(app.state.admission.in_flight, 2)
+                self.assertEqual(len(self.records), 2)
+            finally:
+                for response in responses:
+                    await response.aclose()
+            await self.wait_for_in_flight(app, 0)
+            self.assertEqual((await client.post("/v1/completions", content=b"{}")).status_code, 200)
+
+    async def test_upload_disconnect_releases_slot_and_busy_rejection_skips_body_read(self):
+        async with self.limited_gateway(max_in_flight=1) as (app, client):
+            _, upload = await asyncio.open_connection(client.base_url.host, client.base_url.port)
+            try:
+                upload.write(b"POST /v1/completions HTTP/1.1\r\nHost: localhost\r\n"
+                             b"Authorization: Bearer test-key\r\nContent-Length: 1000\r\n\r\n")
+                await upload.drain()
+                await self.wait_for_in_flight(app, 1)
+                reader, rejected = await asyncio.open_connection(client.base_url.host, client.base_url.port)
+                try:
+                    rejected.write(b"POST /v1/completions HTTP/1.1\r\nHost: localhost\r\n"
+                                   b"Authorization: Bearer second-test-key\r\nContent-Length: 1000\r\n\r\n")
+                    await rejected.drain()
+                    headers = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 1)
+                    self.assertIn(b"503 Service Unavailable", headers)
+                    self.assertEqual(self.records, [])
+                finally:
+                    rejected.close()
+                    await rejected.wait_closed()
+            finally:
+                upload.close()
+                await upload.wait_closed()
+            await self.wait_for_in_flight(app, 0)
+            self.assertEqual((await client.post("/v1/completions", content=b"{}")).status_code, 200)
 
     async def test_unauthorized_requests_never_reach_upstream(self):
         async with httpx.AsyncClient(base_url=self.gateway_url, trust_env=False) as anonymous:
@@ -330,8 +476,9 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(b'"usage":{"completion_tokens":1}', rest)
             self.assertTrue(rest.endswith(b"data: [DONE]\n\n"))
         await asyncio.wait_for(self.stream_closed.wait(), 2)
-        # max_connections=1: a normal completed stream must release its pool slot.
-        self.assertEqual((await self.client.get("/v1/models")).status_code, 200)
+        # max_connections=max_in_flight=1: release both pool and inference slots.
+        await self.wait_for_in_flight(self.gateway_app, 0)
+        self.assertEqual((await self.client.post("/v1/completions", content=b"{}")).status_code, 200)
 
     async def test_disconnect_closes_upstream_stream_and_releases_pool(self):
         async with self.client.stream("POST", "/v1/completions", content=b"{}",
@@ -339,7 +486,8 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(anext(response.aiter_bytes()), 1)
         await asyncio.wait_for(self.stream_closed.wait(), 2)
         self.assertFalse(self.stream_release.is_set())
-        self.assertEqual((await self.client.get("/v1/models")).status_code, 200)
+        await self.wait_for_in_flight(self.gateway_app, 0)
+        self.assertEqual((await self.client.post("/v1/completions", content=b"{}")).status_code, 200)
 
     async def test_disconnect_while_waiting_for_headers(self):
         host, port = self.gateway_url.removeprefix("http://").split(":")
@@ -356,7 +504,8 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             writer.close()
             await writer.wait_closed()
         await asyncio.wait_for(self.headers_disconnected.wait(), 2)
-        self.assertEqual((await self.client.get("/v1/models")).status_code, 200)
+        await self.wait_for_in_flight(self.gateway_app, 0)
+        self.assertEqual((await self.client.post("/v1/completions", content=b"{}")).status_code, 200)
 
     async def test_header_timeout_is_504_and_releases_connection(self):
         app = create_app(gateway_settings(upstream_url=self.upstream_url, read_timeout=0.1))
@@ -367,7 +516,8 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(response.status_code, 504)
                 self.assertEqual(response.json()["error"]["code"], "upstream_timeout")
                 await asyncio.wait_for(self.headers_disconnected.wait(), 2)
-                self.assertEqual((await client.get("/v1/models")).status_code, 200)
+                await self.wait_for_in_flight(app, 0)
+                self.assertEqual((await client.post("/v1/completions", content=b"{}")).status_code, 200)
 
     async def test_stream_timeout_aborts_instead_of_faking_done(self):
         app = create_app(gateway_settings(upstream_url=self.upstream_url, read_timeout=0.1))
@@ -384,7 +534,8 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                         with self.assertRaises(httpx.RemoteProtocolError):
                             await anext(chunks)
                 await asyncio.wait_for(self.stream_closed.wait(), 2)
-                self.assertEqual((await client.get("/v1/models")).status_code, 200)
+                await self.wait_for_in_flight(app, 0)
+                self.assertEqual((await client.post("/v1/completions", content=b"{}")).status_code, 200)
 
     async def test_unreachable_upstream_is_502(self):
         # Reserve a port until the gateway is started, then close it. On macOS
@@ -392,13 +543,15 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         with socket.socket() as unused:
             unused.bind(("127.0.0.1", 0))
             url = f"http://127.0.0.1:{unused.getsockname()[1]}"
-            async with running_server(create_app(gateway_settings(upstream_url=url))) as gateway:
+            app = create_app(gateway_settings(upstream_url=url))
+            async with running_server(app) as gateway:
                 unused.close()
                 async with httpx.AsyncClient(base_url=gateway, trust_env=False, headers=AUTH_HEADERS) as client:
-                    response = await client.get("/v1/models")
+                    response = await client.post("/v1/completions", content=b"{}")
                     self.assertEqual(response.status_code, 502)
                     self.assertEqual(response.json()["error"]["code"], "upstream_unavailable")
                     self.assertNotIn(url, response.text)
+                    await self.wait_for_in_flight(app, 0)
                     self.assertEqual((await client.get("/health")).status_code, 200)
 
 

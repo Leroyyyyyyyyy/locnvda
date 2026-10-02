@@ -4,9 +4,16 @@ Run locally: python -m uvicorn gateway.mock_upstream:app --port 8000
 """
 import asyncio
 import json
+import math
+import os
 
 from fastapi import FastAPI, Request
 from starlette.responses import StreamingResponse
+
+# Slower demo streams give a human time to submit a second concurrent request.
+STREAM_DELAY = float(os.environ.get("MOCK_STREAM_DELAY", "0.3"))
+if not math.isfinite(STREAM_DELAY) or STREAM_DELAY < 0:
+    raise ValueError("MOCK_STREAM_DELAY must be finite and non-negative")
 
 app = FastAPI(title="Local mock vLLM (development only)")
 
@@ -42,7 +49,7 @@ async def complete(request: Request):
             choice["delta" if chat else "text"] = {"content": piece} if chat else piece
             yield encode({**common, "object": "chat.completion.chunk" if chat else "text_completion",
                           "choices": [choice]})
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(STREAM_DELAY)
         choice = {"index": 0, "finish_reason": "stop", "delta" if chat else "text": {} if chat else ""}
         yield encode({**common, "choices": [choice]})
         if payload.get("stream_options", {}).get("include_usage"):

@@ -8,6 +8,7 @@ from types import MappingProxyType
 from urllib.parse import urlsplit
 
 from gateway.auth import validate_api_keys, valid_token
+from gateway.limits import validate_limits
 
 
 def load_api_keys(raw):
@@ -40,6 +41,9 @@ class Settings:
     pool_timeout: float = 5.0
     max_connections: int = 100
     max_keepalive_connections: int = 20
+    rate_limit_rps: float = 5.0
+    rate_limit_burst: int = 10
+    max_in_flight: int = 8
 
     def __post_init__(self):
         validate_api_keys(self.api_keys)
@@ -62,6 +66,9 @@ class Settings:
             raise ValueError("max_connections must be positive")
         if not 0 <= self.max_keepalive_connections <= self.max_connections:
             raise ValueError("max_keepalive_connections must be between 0 and max_connections")
+        validate_limits(self.rate_limit_rps, self.rate_limit_burst, self.max_in_flight)
+        if self.max_in_flight > self.max_connections:
+            raise ValueError("max_in_flight must not exceed max_connections")
 
     @classmethod
     def from_env(cls):
@@ -71,8 +78,8 @@ class Settings:
             "upstream_api_key": os.environ.get("GATEWAY_UPSTREAM_API_KEY"),
             "upstream_url": os.environ.get("GATEWAY_UPSTREAM_URL", defaults.upstream_url),
         }
-        for name in ("connect_timeout", "read_timeout", "write_timeout", "pool_timeout"):
+        for name in ("connect_timeout", "read_timeout", "write_timeout", "pool_timeout", "rate_limit_rps"):
             values[name] = float(os.environ.get(f"GATEWAY_{name.upper()}", getattr(defaults, name)))
-        for name in ("max_connections", "max_keepalive_connections"):
+        for name in ("max_connections", "max_keepalive_connections", "rate_limit_burst", "max_in_flight"):
             values[name] = int(os.environ.get(f"GATEWAY_{name.upper()}", getattr(defaults, name)))
         return cls(**values)
