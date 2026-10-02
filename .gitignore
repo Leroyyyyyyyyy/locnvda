@@ -4,6 +4,7 @@
 
 # Python
 .venv/
+.venv-gateway/
 __pycache__/
 *.pyc
 

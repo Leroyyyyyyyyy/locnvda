@@ -1,6 +1,6 @@
 """Run setup.sh with mocked commands; no GPU, network or installation required.
 
-Usage: python3 -m unittest discover -s tests -v
+Usage: python3 -m unittest discover -s tests -p test_setup.py -v
 """
 import os
 from pathlib import Path

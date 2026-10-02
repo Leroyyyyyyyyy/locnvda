@@ -1,7 +1,7 @@
 # HANDOFF：LLM 推理服务部署学习项目
 
 > 用途：新会话 / 新实例接手时先读这份文档。记录目标、约束、设计决定和当前进度。
-> 最后更新：2026-09-29
+> 最后更新：2026-10-02
 
 ---
 
@@ -170,14 +170,24 @@
   - [x] 3a：9B 三份配置 `configs/qwen3.5-9b-{bf16,awq,fp8}.env`，除模型外参数完全相同，本地 dry run 通过
   - [ ] 3b：同一台实例依次部署三份配置，记录显存、跑标准压测套件
   - [ ] 3c：效果对比（`eval/` 评测集，含 FP8 KV cache 的精度影响）
-- [ ] 阶段 4：API 网关
+- [ ] 阶段 4：API 网关（当前学习重点）
+  - [x] 4a：`gateway/app.py` + `config.py` 异步代理，支持 models / completions / chat completions，普通 JSON 与 SSE 原始字节转发。
+  - [x] 4a 本地验收：真实 localhost TCP 模拟服务覆盖请求/响应透传、SSE 不缓冲、断连清理（含等待响应头阶段）、错误/超时、压缩和连接池释放。CPU 演示服务为 `gateway/mock_upstream.py`，安装/运行/原理见 `gateway/README.md`。
+  - [x] 4a 用户手动验证：模型列表、SSE、停止模拟上游后的 502、上游重启后恢复 200，网关无需重启。
+  - [ ] 4a 真实 vLLM 验收与直连 / 网关开销对比（当前没有限流或在途并发保护，只监听本机；独立 `.venv-gateway`，不修改推理环境依赖）。
+  - [x] 4b 实现：`gateway/auth.py` 静态 key 注册表，`GATEWAY_API_KEYS` 为必填 JSON（调用方 ID → key），无/错/重复 Authorization 返回 401，认证先于读请求体；内部只记录 `request.state.caller_id`。客户端 Authorization 删除，上游独立使用 `GATEWAY_UPSTREAM_API_KEY`，未配置就不发送授权头；`/health` 可匿名访问。
+  - [x] 4b 自动验收：含身份区分/防伪造、拒绝请求不上游、凭证隔离、配置失败时拒绝启动、错误/对象 repr 不回显密钥；全套 31 项测试通过（含 4a 与 setup 回归），无需 GPU。
+  - [x] 4b 用户已手动验证：无 key 返回 401，正确 key 返回 200 和模型列表。
+  - [ ] 4b 其余手动验收：错误 key 的 401、带 key 的 SSE；真实 vLLM 上游鉴权仍待验收（对应本地自动测试已覆盖）。
+  - [ ] 4c：按 key 限流 + 全局在途推理请求保护。
+  - [ ] 4d：结构化日志与网关压测。
 - [ ] 阶段 5：SGLang 对比
 - [ ] 阶段 6：27B 方案 a / b / c
   - 当前执行顺序调整：用户选择先做 27B 方案 b（同机 2×4090，TP=2），先 FP8 后 AWQ；9B 配置保留，BF16 基准需另租大显存卡。
   - [x] 方案 b 两份配置已写好，本地 dry run 通过；HF config.json 确认官方 FP8 为 `fp8` / 128×128 block，社区 AWQ 为 `compressed-tensors` / int4 / group_size=32，两者都自动识别。
   - 实例验机确认：2×RTX 4090，各 24564MiB，驱动 615.71.09；GPU0/GPU1 拓扑为 NODE，同一 NUMA 节点。系统可见内存 503GiB（可能为宿主机总量），磁盘可用约 150G；通信性能、量化 kernel 及显存余量待实测。
   - setup 退出的实际原因已确认：驱动 615.71.09 的表头改为 `CUDA UMD Version: 13.4`，不是原来的 `CUDA Version`（最初误判为空白格式问题）。解析已兼容新旧字段和空白，无效值与命令失败都会明确报错；13.4 驱动选择 cu130 构建。
-  - 回归测试 `tests/test_setup.py`：用模拟命令运行 setup，不联网、不安装包，覆盖实例原始表头、新旧字段、空白、CUDA 12/13、N/A、字段缺失及 nvidia-smi 失败。运行 `python3 -m unittest discover -s tests -v`；实例已安装成功：vLLM 0.30.0、torch 2.13.0+cu130、CUDA 13.0、gpus=2。
+  - 回归测试 `tests/test_setup.py`：用模拟命令运行 setup，不联网、不安装包，覆盖实例原始表头、新旧字段、空白、CUDA 12/13、N/A、字段缺失及 nvidia-smi 失败。单独运行 `python3 -m unittest discover -s tests -p test_setup.py -v`（全套测试使用 `.venv-gateway/bin/python -m unittest discover -s tests -v`）；实例已安装成功：vLLM 0.30.0、torch 2.13.0+cu130、CUDA 13.0、gpus=2。
   - [x] 27B 官方 FP8 / TP=2 部署和冒烟测试成功，启动基线见 `results/stage3-27b-baseline.md`；每卡 nvidia-smi 占用 22072MiB。TP1 报告 weights+non-torch=14.39GiB、激活=0.75GiB、CUDA graph=0.12GiB、KV cache=6.1GiB；EngineCore 报告容量 122398 token，满 8192 上下文最大并发 14.94x（整个 TP=2 服务，不能再乘 2）；实际 kernel 已确认是 Marlin FP8 weight-only（非原生 W8A8）。
   - [x] 27B FP8 标准压测：chat 528/528、long 96/96 成功，终端摘要分析见 `results/stage3-27b-fp8-analysis.md`；chat 吞吐 48.5→319.0 tok/s（并发 1→64），32→64 仅 +1.6%。报告 `results/report-20261001-151122.md` 和两份原始 JSON 已拉回并核查，尾延迟与日志证据见运行核查文档。
   - [x] AWQ / TP=2 相同参数部署和冒烟测试成功，15:23:22 完成；TP0 报告 weights+non-torch=9.24GiB、激活=0.75GiB、CUDA graph=0.12GiB、KV cache=11.25GiB，每卡 nvidia-smi 占用 22086MiB。对比记录见启动基线。
@@ -189,6 +199,8 @@
   - [ ] 量化质量评测，及可选的通信 / kernel 支持专项实验。
 
 ## 10. 下一步
+
+当前用户选择先做阶段 4。4a 本地手动验证已完成，4b 鉴权实现与自动测试已通过，用户已验证无 key 的 401 和正确 key 的 200。下一步进入 4c：按调用方限流和全局在途并发保护，仍可用本地模拟上游完成；错误 key / 带 key 的 SSE 手动验证、真实 vLLM 验收、质量评测与多卡专项仍保留为待办。
 
 1. 两轮结果、报告和日志已经安全保存到本地；如不继续使用 GPU，可 destroy 停止计费。原始日志在忽略的 `logs/`，关键证据摘录已写入 `results/stage3-27b-runtime-findings.md`。
 2. 准备独立效果评测；当前只完成显存、速度与运行路径核查，不能仅凭性能决定量化选型。

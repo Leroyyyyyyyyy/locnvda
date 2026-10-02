@@ -37,6 +37,13 @@ scripts/deploy.sh configs/qwen3.5-0.8b.env    # 装环境 → 下模型 → 启�
 GPU_MEMORY_UTILIZATION=0.5 MAX_MODEL_LEN=4096 scripts/deploy.sh configs/qwen3.5-0.8b.env
 ```
 
+## API 网关（阶段 4a / 4b）
+
+`gateway/` 已实现异步 JSON / SSE 代理、调用方 API key 鉴权与上游凭证隔离，可用 CPU 模拟上游验证，无需租 GPU。
+启动时必须设置 `GATEWAY_API_KEYS`，三个 `/v1/...` 路由都要求 Bearer key，`/health` 可匿名访问。
+安装、启动、curl 示例与参数原理见 [gateway/README.md](gateway/README.md)。
+目前**没有限流或在途并发保护，只应监听本机**。
+
 ## 压测
 
 服务用 `deploy.sh` 启动后，在实例上运行（压测客户端和服务在同一台机器，避免网络延迟混进 TTFT）：

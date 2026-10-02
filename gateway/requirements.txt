@@ -1,0 +1,6 @@
+# CPU-only gateway; install in a separate venv, not the vLLM environment.
+fastapi==0.115.12
+starlette==0.46.2
+httpx==0.28.1
+anyio==4.9.0
+uvicorn==0.34.2
